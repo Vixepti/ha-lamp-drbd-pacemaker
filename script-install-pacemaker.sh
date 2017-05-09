@@ -182,30 +182,31 @@ if [[ $HOSTNAME = "s-ha-web1" ]]; then
 	echo -e "\033[33;40m------------ Desactivation de STONITH et du QUORUM ------------\033[0m"
 	crm configure property stonith-enabled=false
 	crm configure property no-quorum-policy=ignore
-	echo -e "\033[33;40m------------ Creation de l adresse IP Virtuelle ------------\033[0m"
-	crm configure primitive vip ocf:heartbeat:IPaddr2 params ip=192.168.100.100 cidr_netmask=24 nic="eth1" op monitor interval="30s" timeout="20s"
+	echo -e "\033[33;40m------------ Creation des adresses IP Virtuelles ------------\033[0m"
+	crm configure primitive vipwww ocf:heartbeat:IPaddr2 params ip=192.168.100.100 cidr_netmask=24 nic="eth1" op monitor interval="30s" timeout="20s"
+	crm configure primitive vipmysql ocf:heartbeat:IPaddr2 params ip=192.168.100.101 cidr_netmask=24 nic="eth1" op monitor interval="30s" timeout="20s"
 	echo -e "\033[33;40m------------ Ajout du service apache2 ------------\033[0m"
-	crm configure primitive p_httpd ocf:heartbeat:apache params configfile="/etc/apache2/apache2.conf" op start timeout="60s" op stop timeout="60s" op monitor timeout="30s"
+	crm configure primitive httpd ocf:heartbeat:apache params configfile="/etc/apache2/apache2.conf" op start timeout="60s" op stop timeout="60s" op monitor timeout="20s"
 	echo -e "\033[33;40m------------ Ajout resources DRBD ------------\033[0m"
-	crm configure primitive p_Drbdwww ocf:linbit:drbd params drbd_resource=rwww op monitor interval="15s"
-	crm configure primitive p_DrbdMysql ocf:linbit:drbd params drbd_resource=rmysql op monitor interval="15s"
+	crm configure primitive Drbdwww ocf:linbit:drbd params drbd_resource="rwww" op monitor interval="30s" role="Slave" op monitor interval="29s" role="Master"
+	crm configure primitive DrbdMysql ocf:linbit:drbd params drbd_resource="rmysql" op monitor interval="30s" role="Slave" op monitor interval="29s" role="Master"
 	echo -e "\033[33;40m------------ Ajout resource fs DRBD ------------\033[0m"
-	crm configure primitive p_fsDrbdwww ocf:heartbeat:Filesystem params device="/dev/drbd0" directory="/var/www/html" fstype="ext4"
-	crm configure primitive p_fsDrbdMysql ocf:heartbeat:Filesystem params device="/dev/drbd1" directory="/var/lib/mysql_drbd" fstype="ext4"
+	crm configure primitive fsDrbdwww ocf:heartbeat:Filesystem params device="/dev/drbd0" directory="/var/www/html" fstype="ext4" op monitor interval="30s" timeout="30s"
+	crm configure primitive fsDrbdMysql ocf:heartbeat:Filesystem params device="/dev/drbd1" directory="/var/lib/mysql_drbd" fstype="ext4" op monitor interval="30s" timeout="30s"
 	echo -e "\033[33;40m------------ Ajout du service mysql ------------\033[0m"
-	crm configure primitive p_mysql ocf:heartbeat:mysql params binary="/usr/sbin/mysqld" config="/var/lib/mysql_drbd/my.cnf" datadir="/var/lib/mysql_drbd/data" pid="/var/run/mysqld/mysqld.pid" socket="/var/run/mysqld/mysqld.sock" user="mysql" group="mysql" additional_parameters="--bind-address=localhost" op start timeout="120s" interval="0" op stop timeout="120s" interval="0" op monitor interval="20s" timeout="30s"
+	crm configure primitive mysql ocf:heartbeat:mysql params binary="/usr/sbin/mysqld" config="/var/lib/mysql_drbd/my.cnf" datadir="/var/lib/mysql_drbd/data" pid="/var/run/mysqld/mysqld.pid" socket="/var/run/mysqld/mysqld.sock" user="mysql" group="mysql" additional_parameters="--bind-address=localhost" op start timeout="120s" interval="0" op stop timeout="120s" interval="0" op monitor interval="20s" timeout="30s"
 	echo -e "\033[33;40m------------ Creation des groupes ------------\033[0m"
-	crm configure group g_http p_fsDrbdwww vip p_httpd
-	crm configure group g_mysql p_fsDrbdMysql vip p_mysql
+	crm configure group gwww fsDrbdwww vipwww httpd
+	crm configure group gmysql fsDrbdMysql vipmysql mysql
 	echo -e "\033[33;40m------------ Creation resources Master - Slave ------------\033[0m"
-	crm configure ms ms_drbd_mysql p_Drbdwww meta master-max="1" master-node-max="1" clone-max="2" clone-node-max="1" notify="true"
-	crm configure ms ms_drbd_www p_DrbdMysql meta master-max="1" master-node-max="1" clone-max="2" clone-node-max="1" notify="true"
+	crm configure ms ms_drbdwww Drbdwww meta master-max="1" master-node-max="1" clone-max="2" clone-node-max="1" notify="true"
+	crm configure ms ms_drbdMysql DrbdMysql meta master-max="1" master-node-max="1" clone-max="2" clone-node-max="1" notify="true"	
 	echo -e "\033[33;40m------------ Creation colocations ------------\033[0m"
-	crm configure colocation c_http_on_drbd inf: g_http ms_drbd_www:Master
-	crm configure colocation c_mysql_on_drbd inf: g_mysql ms_drbd_mysql:Master
+	crm configure colocation cl_gwww-with-drbdwww inf: gwww ms_drbdwww:Master
+	crm configure colocation cl_gmysql-with-drbdMysql inf: gmysql ms_drbdMysql:Master
 	echo -e "\033[33;40m------------ Configuration priorite ------------\033[0m"
-	crm configure order o_drbd_before_http inf: ms_drbd_www:promote g_http:start
-	crm configure order o_drbd_before_mysql inf: ms_drbd_mysql:promote g_mysql:start
+	crm configure order o_drbdwww-before-gwww inf: ms_drbdwww:promote gwww:start
+	crm configure order o_drbdMysql-before-gmysql inf: ms_drbdMysql:promote gmysql:start
 	echo -e "\033[33;40m------------ Configuration de corosync Terminee ------------\033[0m"
 	read -p "Appuyer sur une touche pour continuer ..."
 	crm_mon
